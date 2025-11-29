@@ -28,6 +28,10 @@ class Record(Base):
     id = Column(Integer, primary_key=True, index=True)
     label = Column(String, nullable=False)
     amount = Column(Float, CheckConstraint("amount > 0"), nullable=False)
+    
+    # NEW: ISO-like currency code for this record, e.g. "USD", "EUR", "IDR"
+    currencyCode = Column(String(3), nullable=True)
+    
     date = Column(DateTime, nullable=False, default=datetime.now)
     accountId = Column(Integer, ForeignKey("account.id"), nullable=False)
     categoryId = Column(Integer, ForeignKey("category.id"), nullable=True)
@@ -64,3 +68,21 @@ class Record(Base):
         if value is not None:
             return round(value, CONFIG.defaults.round_decimals)
         return value
+    
+    @validates("currencyCode")
+    def validate_currency_code(self, key, value):
+        """
+        Normalise currency codes:
+        - empty / None -> None
+        - strip + uppercase
+        No hard validation against CONFIG here to avoid surprises if config changes.
+        """
+        if not value:
+            return None
+        value = value.strip().upper()
+        if len(value) != 3:
+            # Be forgiving: either raise or just keep as-is.
+            # For demo & stability I'd keep it strict:
+            raise ValueError(f"Invalid currency code: {value!r}")
+        return value
+

@@ -16,6 +16,8 @@ from bagels.managers.accounts import (
 from bagels.modals.confirmation import ConfirmationModal
 from bagels.modals.input import InputModal
 
+from bagels.utils.currency import format_amount
+
 
 class AccountsList(ListView):
     def __init__(self, accounts, *args, **kwargs):
@@ -36,7 +38,7 @@ class AccountsList(ListView):
                         classes="left-container",
                     ),
                     Label(
-                        str(account.balance),
+                        format_amount(account.balance, getattr(account, "currencyCode", None)),
                         classes="balance",
                         id=f"account-{account.id}-balance",
                     ),
@@ -86,7 +88,7 @@ class AccountMode(ScrollableContainer):
                 continue
             # Update balance
             self.query_one(f"#account-{account.id}-balance").update(
-                str(account.balance)
+                format_amount(account.balance, None)
             )
 
             # Update account container classes
@@ -116,7 +118,7 @@ class AccountMode(ScrollableContainer):
 
         super().__setattr__(
             "border_title",
-            f"Accounts @= {round(net_balance, CONFIG.defaults.round_decimals)}",
+            f"Accounts @= {format_amount(round(net_balance, CONFIG.defaults.round_decimals), None)}",
         )
 
     # region Callbacks

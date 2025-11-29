@@ -9,6 +9,9 @@ from bagels.models.database.app import db_engine
 from bagels.models.record import Record
 from bagels.models.split import Split
 
+from bagels.managers.currency_rates import convert as convert_currency
+
+
 Session = sessionmaker(bind=db_engine)
 
 
@@ -48,6 +51,8 @@ def get_account_balance(accountId, session=None):
         should_close = True
     else:
         should_close = False
+        
+    default_code = CONFIG.defaults.default_currency
 
     try:
         # Initialize balance
@@ -63,15 +68,22 @@ def get_account_balance(accountId, session=None):
 
         # Calculate balance from records
         for record in records:
-            if record.isTransfer:
-                # For transfers, subtract full amount (transfers out)
-                balance -= record.amount
-            elif record.isIncome:
-                # For income records, add full amount
-                balance += record.amount
+            # record.amount in record's currency; convert to default currency
+            code = getattr(record, "currencyCode", None) or default_code
+            if code == default_code:
+                amount_default = record.amount
             else:
-                # For expense records, subtract full amount
-                balance -= record.amount
+                amount_default = convert_currency(record.amount, code, default_code)
+                if amount_default is None:
+                    # can't convert → skip for balance
+                    continue
+
+            if record.isTransfer:
+                balance -= amount_default
+            elif record.isIncome:
+                balance += amount_default
+            else:
+                balance -= amount_default
 
         # Get all records where this account is the transfer destination
         transfer_to_records = (
@@ -82,18 +94,43 @@ def get_account_balance(accountId, session=None):
 
         # Add transfers into this account
         for record in transfer_to_records:
-            balance += record.amount
+            code = getattr(record, "currencyCode", None) or default_code
+            if code == default_code:
+                amount_default = record.amount
+            else:
+                amount_default = convert_currency(record.amount, code, default_code)
+                if amount_default is None:
+                    continue
+            balance += amount_default
+
 
         # Get all splits where this account is specified
         splits = session.query(Split).filter(Split.accountId == accountId).all()
 
         # Add paid splits (they represent money coming into this account)
         for split in splits:
-            if split.isPaid:
-                if split.record.isIncome:
-                    balance -= split.amount
-                else:
-                    balance += split.amount
+            if not split.isPaid:
+                continue
+
+            # choose best currency for this split
+            code = (
+                getattr(split, "currencyCode", None)
+                or getattr(split.record, "currencyCode", None)
+                or default_code
+            )
+
+            if code == default_code:
+                amount_default = split.amount
+            else:
+                amount_default = convert_currency(split.amount, code, default_code)
+                if amount_default is None:
+                    continue
+
+            if split.record.isIncome:
+                balance -= amount_default
+            else:
+                balance += amount_default
+
 
         return round(balance, CONFIG.defaults.round_decimals)
     finally:

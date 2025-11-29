@@ -221,7 +221,13 @@ class Budgets(Static):
 
             row5.styles.width = f"{p_tospend}%"
             bar_want_quota = row5.query_one("#bar-must-quota")
-            p_want_quota = round(want_quota / (net_income - amount_to_save) * 100)
+
+            base_for_wants = net_income - amount_to_save
+            if base_for_wants <= 0:
+                p_want_quota = 0
+            else:
+                p_want_quota = round(want_quota / base_for_wants * 100)
+
             bar_want_quota.styles.width = f"{p_want_quota}%"
 
     # region View

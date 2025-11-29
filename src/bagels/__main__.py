@@ -121,6 +121,56 @@ def locate(thing_to_locate: str) -> None:
     elif thing_to_locate == "database":
         print("Database file:")
         print(database_file())
+        
+@cli.group()
+def currency() -> None:
+    """Manage currency exchange rates."""
+    # Ensure config & DB are loaded before subcommands run
+    from bagels.config import load_config
+    from bagels.models.database.app import init_db
+
+    load_config()
+    init_db()
+
+
+@currency.command("list")
+def currency_list() -> None:
+    """List all stored exchange rates."""
+    # Import lazily so that --at has been processed before DB engine is created
+    from bagels.managers.currency_rates import list_rates
+
+    rates = list_rates()
+    if not rates:
+        click.echo("No currency rates found.")
+        return
+
+    click.echo("Stored exchange rates (1 FROM = RATE TO):")
+    for r in rates:
+        source = "manual" if r.isManual else "auto"
+        updated = r.updatedAt.isoformat(sep=" ", timespec="seconds") if r.updatedAt else "n/a"
+        click.echo(
+            f"- {r.fromCode} -> {r.toCode} = {r.rate} ({source}, updated {updated})"
+        )
+
+
+@currency.command("set-rate")
+@click.argument("from_code")
+@click.argument("to_code")
+@click.argument("rate", type=float)
+def currency_set_rate(from_code: str, to_code: str, rate: float) -> None:
+    """
+    Set or update an exchange rate.
+
+    FROM_CODE and TO_CODE are 3-letter codes (e.g. USD, IDR).
+    RATE is the multiplier: 1 FROM_CODE = RATE TO_CODE.
+    """
+    from bagels.managers.currency_rates import set_rate
+
+    from_code = from_code.strip().upper()
+    to_code = to_code.strip().upper()
+
+    set_rate(from_code, to_code, rate)
+    click.echo(f"Stored rate: 1 {from_code} = {rate} {to_code}")
 
 
 if __name__ == "__main__":

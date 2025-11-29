@@ -9,6 +9,10 @@ from bagels.models.category import Category
 from bagels.models.database.app import db_engine
 from bagels.models.record import Record
 
+from bagels.config import CONFIG
+from bagels.managers.currency_rates import convert as convert_currency
+
+
 Session = sessionmaker(bind=db_engine)
 
 
@@ -114,12 +118,24 @@ def get_all_categories_records(
             Record.date < end_of_period,
             Record.isIncome == is_income,
         )
+        
+        default_code = CONFIG.defaults.default_currency
 
-        category_totals = {}
+        category_totals: dict[int, float] = {}
         records = session.scalars(stmt).all()
         for record in records:
             split_total = sum(split.amount for split in record.splits)
+            # net in record's own currency
             record_amount = record.amount - split_total
+
+            code = getattr(record, "currencyCode", None) or default_code
+            if code == default_code:
+                amount_default = record_amount
+            else:
+                amount_default = convert_currency(record_amount, code, default_code)
+                if amount_default is None:
+                    # skip this record for category totals
+                    continue
 
             if record.category is None:
                 continue
@@ -128,9 +144,7 @@ def get_all_categories_records(
             if not subcategories and record.category.parentCategoryId:
                 category_id = record.category.parentCategoryId
 
-            if category_id not in category_totals:
-                category_totals[category_id] = 0
-            category_totals[category_id] += record_amount
+            category_totals[category_id] = category_totals.get(category_id, 0.0) + amount_default
 
         stmt = (
             select(Category)

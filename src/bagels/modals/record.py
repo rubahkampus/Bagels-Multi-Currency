@@ -134,38 +134,43 @@ class RecordModal(InputModal):
         event.input.heldValue = person.id
 
     def on_auto_complete_selected(self, event: AutoComplete.Selected) -> None:
-        if (
-            "field-label" in event.input.id
-        ):  # if the autocompleted field is the label field
-            template = get_template_by_id(
-                event.input.heldValue
-            )  # get the template specified
-            for field in self.form.fields[
-                1:-1
-            ]:  # skip the label field and the date field
+        if "field-label" in event.input.id:  # if the autocompleted field is the label field
+            template = get_template_by_id(event.input.heldValue)  # get the template specified
+
+            for field in self.form.fields:
+                # never overwrite label or date from the template
+                if field.key in ("label", "date"):
+                    continue
+
                 has_heldValue = field.type in ["autocomplete"]
                 fieldWidget = self.query_one(f"#field-{field.key}")
+
                 if not has_heldValue:
                     if field.type == "boolean":
                         fieldWidget.value = getattr(template, field.key)
                     else:
-                        fieldWidget.value = str(getattr(template, field.key))
+                        fieldWidget.value = str(getattr(template, field.key, "") or "")
                 else:
-                    fieldWidget.heldValue = getattr(template, field.key)
-                    if "Id" in field.key:
-                        fieldWidget.value = str(
-                            getattr(
-                                getattr(template, field.key.replace("Id", "")), "name"
-                            )
+                    template_value = getattr(template, field.key, None)
+                    fieldWidget.heldValue = template_value
+
+                    # For xxxId fields, show the related object's name
+                    if "Id" in field.key and template_value is not None:
+                        related_obj = getattr(
+                            template,
+                            field.key.replace("Id", ""),
+                            None,
                         )
-                    # Call handle select index to properly handle other updates
+                        if related_obj is not None:
+                            fieldWidget.value = str(getattr(related_obj, "name", ""))
+
+                    # For autocomplete fields, also drive the controller so any side-effects fire
                     controller: Field = self.query_one(f"#field-{field.key}-controller")
-                    # Find the matching option index for the template value
-                    template_value = getattr(template, field.key)
-                    for index, option in enumerate(field.options.items):
-                        if option.value == template_value:
-                            controller.handle_select_index(index)
-                            break
+                    if field.options and field.options.items:
+                        for index, option in enumerate(field.options.items):
+                            if option.value == template_value:
+                                controller.handle_select_index(index)
+                                break
 
             self.app.notify(
                 title="Success",

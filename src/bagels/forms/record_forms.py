@@ -3,6 +3,8 @@ from datetime import datetime
 
 from rich.text import Text
 
+from bagels.config import CONFIG  # ⬅️ new
+
 from bagels.forms.form import Form, FormField, Option, Options
 from bagels.managers.accounts import get_all_accounts_with_balance
 from bagels.managers.categories import get_all_categories_by_freq
@@ -70,6 +72,18 @@ class RecordForm:
                 type="dateAutoDay",
                 default_value=datetime.now().strftime("%d"),
             ),
+            
+            # ========= NEW FIELD =========
+            FormField(
+                title="Currency",
+                key="currencyCode",
+                type="autocomplete",
+                options=Options(),              # akan diisi di helper
+                is_required=False,              # kosong = pakai default currency
+                placeholder="Leave empty for default currency",
+            ),
+            # =============================
+            
         ]
     )
 
@@ -118,22 +132,30 @@ class RecordForm:
 
     def __init__(self):
         self._populate_form_options()
+        
+        self._populate_currency_options()   # ⬅️ new
 
     # region Helpers
     # -------------- Helpers ------------- #
 
     def _populate_form_options(self):
         templates = get_record_templates()
+        default_code = CONFIG.defaults.default_currency
+
         self.FORM.fields[0].options = Options(
             items=[
                 Option(
                     text=template.label,
                     value=template.id,
-                    postfix=Text(f"{template.amount}", style="yellow"),
+                    postfix=Text(
+                        f"{getattr(template, 'currencyCode', None) or default_code} {template.amount}",
+                        style="yellow",
+                    ),
                 )
                 for template in templates
             ]
         )
+
 
         accounts = get_all_accounts_with_balance()
         self.FORM.fields[3].options = Options(
@@ -180,6 +202,44 @@ class RecordForm:
         self.SPLIT_FORM.fields[3].options = Options(
             items=[Option(text=account.name, value=account.id) for account in accounts]
         )
+        
+    def _populate_currency_options(self) -> None:
+        """Fill currencyCode options from CONFIG.currencies.supported."""
+        currencies_cfg = getattr(CONFIG, "currencies", None)
+        if not currencies_cfg or not getattr(currencies_cfg, "supported", None):
+            return
+
+        # Cari field currencyCode di FORM
+        currency_field = next(
+            (f for f in self.FORM.fields if f.key == "currencyCode"),
+            None,
+        )
+        if currency_field is None:
+            return
+
+        items: list[Option] = []
+        for cur in currencies_cfg.supported:
+            # asumsi cur punya .code, .symbol, .decimals dari langkah (2)
+            label = f"{cur.code} ({cur.symbol})"
+            items.append(
+                Option(
+                    text=label,
+                    value=cur.code,
+                )
+            )
+
+        currency_field.options = Options(items=items)
+
+        # Default = CONFIG.defaults.default_currency
+        default_code = getattr(CONFIG.defaults, "default_currency", None)
+        if default_code:
+            currency_field.default_value = default_code
+            # set teks yang kelihatan di UI
+            for opt in items:
+                if opt.value == default_code:
+                    currency_field.default_value_text = opt.text
+                    break
+
 
     # region Builders
     # ------------- Builders ------------- #
@@ -231,6 +291,15 @@ class RecordForm:
                 case "label":
                     field.default_value = str(value) if value is not None else ""
                     field.type = "string"  # disable autocomplete
+                case "currencyCode":
+                    code = value or CONFIG.defaults.default_currency
+                    field.default_value = code
+                    # map to option label
+                    opts = field.options.items if field.options else []
+                    for opt in opts:
+                        if opt.value == code:
+                            field.default_value_text = opt.text
+                            break
                 case _:
                     field.default_value = str(value) if value is not None else ""
 

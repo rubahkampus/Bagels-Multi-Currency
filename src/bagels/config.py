@@ -5,7 +5,7 @@ import warnings
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from bagels.locations import config_file
 
@@ -16,6 +16,31 @@ class Defaults(BaseModel):
     date_format: str = "%d/%m"
     round_decimals: int = 2
     plot_marker: Literal["braille", "fhd", "hd", "dot"] = "braille"
+    
+    # NEW:
+    default_currency: str = "USD"  # or "IDR" if you want that as repo default
+    
+    
+class CurrencyConfig(BaseModel):
+    code: str      # ISO-like, e.g. "USD"
+    symbol: str    # e.g. "$"
+    decimals: int  # e.g. 2 for USD, 0 for IDR
+
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, v: str) -> str:
+        v = v.strip().upper()
+        if len(v) != 3:
+            raise ValueError(f"currency code must be 3 letters, got {v!r}")
+        return v
+
+
+class Currencies(BaseModel):
+    supported: list[CurrencyConfig] = [
+        CurrencyConfig(code="USD", symbol="$",  decimals=2),
+        CurrencyConfig(code="EUR", symbol="€",  decimals=2),
+        CurrencyConfig(code="IDR", symbol="Rp", decimals=0),
+    ]
 
 
 class DatemodeHotkeys(BaseModel):
@@ -35,6 +60,7 @@ class HomeHotkeys(BaseModel):
     select_prev_account: str = "["
     select_next_account: str = "]"
     toggle_use_account: str = "\\"
+    set_manual_rate: str = "ctrl+r"
     datemode: DatemodeHotkeys = DatemodeHotkeys()
 
 
@@ -109,6 +135,8 @@ class Config(BaseModel):
     symbols: Symbols = Symbols()
     defaults: Defaults = Defaults()
     state: State = State()
+    
+    currencies: Currencies = Currencies()  # NEW
 
     def __init__(self, **data):
         try:
@@ -116,6 +144,19 @@ class Config(BaseModel):
             merged_data = {**self.model_dump(), **config_data, **data}
             super().__init__(**merged_data)
             self.ensure_yaml_fields()
+            
+            # NEW: cross-field check for default_currency
+            codes = {c.code.upper() for c in self.currencies.supported}
+            dc = (self.defaults.default_currency or "").strip().upper()
+            if dc not in codes:
+                raise ConfigurationError(
+                    f"Invalid configuration in field 'defaults.default_currency'\n"
+                    f"Current value: '{self.defaults.default_currency}'\n"
+                    f"Allowed values: {', '.join(sorted(codes))}"
+                )
+            # normalise in memory
+            self.defaults.default_currency = dc
+            
         except ValidationError as e:
             error_messages = []
             for error in e.errors():
@@ -178,7 +219,11 @@ class Config(BaseModel):
     @classmethod
     def get_default(cls):
         return cls(
-            hotkeys=Hotkeys(), symbols=Symbols(), defaults=Defaults(), state=State()
+            hotkeys=Hotkeys(),
+            symbols=Symbols(),
+            defaults=Defaults(),
+            state=State(),
+            currencies=Currencies(),
         )
 
 
@@ -263,3 +308,39 @@ def write_state(key: str, value: Any) -> None:
     for k in keys[:-1]:
         d = getattr(d, k)
     setattr(d, keys[-1], value)
+
+
+def set_default_currency(code: str) -> None:
+    """Persist the default currency in config.yaml and update CONFIG.defaults."""
+    global CONFIG
+
+    if CONFIG is None:
+        load_config()  # call the function from this same module
+
+    code = (code or "").strip().upper()
+
+    # Validate against supported currencies
+    supported = {c.code.upper() for c in CONFIG.currencies.supported}
+    if code not in supported:
+        raise ValueError(
+            f"Unsupported currency code: {code}. "
+            f"Supported: {', '.join(sorted(supported))}"
+        )
+
+    # Load current config.yaml (if any)
+    try:
+        with open(config_file(), "r") as f:
+            config = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        config = {}
+
+    # Ensure "defaults" section exists and set the value
+    defaults = config.setdefault("defaults", {})
+    defaults["default_currency"] = code
+
+    # Write back to disk
+    with open(config_file(), "w") as f:
+        yaml.dump(config, f, default_flow_style=False)
+
+    # Update in-memory CONFIG
+    CONFIG.defaults.default_currency = code

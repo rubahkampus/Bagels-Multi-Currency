@@ -38,6 +38,13 @@ Records .label-highlight-match {
         (CONFIG.hotkeys.edit, "edit", "Edit"),
         (CONFIG.hotkeys.home.new_transfer, "new_transfer", "Transfer"),
         (CONFIG.hotkeys.home.toggle_splits, "toggle_splits", "Toggle Splits"),
+        # New binding – uses a literal combo so you don't have to touch CONFIG yet
+        Binding(
+            CONFIG.hotkeys.home.set_manual_rate,  # add a new hotkey in config.yaml
+            "set_manual_rate",
+            "Set FX rate",
+            priority=True,
+        ),
         Binding(
             CONFIG.hotkeys.home.display_by_person,
             "display_by_person",

@@ -21,6 +21,10 @@ from bagels.modals.input import InputModal
 from bagels.modals.record import RecordModal
 from bagels.modals.transfer import TransferModal
 
+from bagels.config import CONFIG
+from bagels.managers.currency_rates import get_rate, set_rate
+from bagels.modals.currency_rate import CurrencyRateModal
+
 
 class RecordCUD:
     def action_new(self) -> None:
@@ -259,6 +263,95 @@ class RecordCUD:
             TransferModal(
                 title="New transfer",
                 defaultDate=self.page_parent.mode["date"].strftime("%d"),
+            ),
+            callback=check_result,
+        )
+
+    def action_set_manual_rate(self) -> None:
+        """
+        Open a small modal to set a manual FX rate.
+
+        Default pair:
+          FROM = default currency
+          TO   = first other supported currency (if any), else same as default.
+        """
+        default_from = CONFIG.defaults.default_currency.upper()
+        # pick a different currency if available
+        default_to = default_from
+        for c in CONFIG.currencies.supported:
+            if c.code.upper() != default_from:
+                default_to = c.code.upper()
+                break
+
+        existing_rate = None
+        # Only call get_rate if we actually have two different codes
+        if default_from != default_to:
+            existing_rate = get_rate(default_from, default_to)
+
+        if existing_rate is not None:
+            current_rate_text = (
+                f"Current: 1 {default_from} ≈ {existing_rate:.4f} {default_to}"
+            )
+            default_rate = existing_rate
+        else:
+            current_rate_text = (
+                f"No stored rate yet for {default_from} → {default_to}"
+                if default_from != default_to
+                else "No conversion needed when currencies are identical"
+            )
+            default_rate = 1.0
+
+        default_values = {
+            "fromCode": default_from,
+            "toCode": default_to,
+            "rate": default_rate,
+        }
+
+        def check_result(result) -> None:
+            if not result:
+                return
+
+            from_code = result["fromCode"]
+            to_code = result["toCode"]
+            rate = float(result["rate"])
+
+            # Extra guard – same-currency should never be saved
+            if from_code == to_code:
+                self.app.notify(
+                    title="Invalid pair",
+                    message="From and To currencies must be different.",
+                    severity="error",
+                    timeout=5,
+                )
+                return
+
+            # Optional: look at previous rate for messaging
+            previous = get_rate(from_code, to_code)
+            set_rate(from_code, to_code, rate, is_manual=True)
+
+            if previous is None:
+                msg = f"Saved manual rate: 1 {from_code} = {rate:.4f} {to_code}"
+            else:
+                msg = (
+                    f"Updated rate: 1 {from_code} was {previous:.4f} {to_code}, "
+                    f"now {rate:.4f} {to_code}"
+                )
+
+            self.app.notify(
+                title="Manual FX rate saved",
+                message=msg,
+                severity="information",
+                timeout=5,
+            )
+            
+            # <- force all modules (Accounts, Insights, etc.) to recompute using new FX
+            self.app.refresh(layout=True, recompose=True)
+
+        self.app.push_screen(
+            CurrencyRateModal(
+                title="Set manual FX rate",
+                default_values=default_values,
+                current_rate_text=current_rate_text,
             ),
             callback=check_result,
         )

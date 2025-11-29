@@ -6,6 +6,7 @@ from rich.text import Text
 from bagels.forms.form import Form, FormField, Option, Options
 from bagels.managers.record_templates import get_transfer_templates
 from bagels.models.record import Record
+from bagels.config import CONFIG  # NEW
 
 
 class TransferForm:
@@ -38,6 +39,14 @@ class TransferForm:
                 is_required=True,
             ),
             FormField(
+                title="Currency",
+                key="currencyCode",
+                type="autocomplete",
+                options=Options(),
+                is_required=False,
+                placeholder="Leave empty for default currency",
+            ),
+            FormField(
                 title="Date",
                 key="date",
                 type="dateAutoDay",
@@ -45,6 +54,7 @@ class TransferForm:
             ),
         ]
     )
+
 
     TEMPLATE_FORM = Form(
         fields=[
@@ -63,6 +73,14 @@ class TransferForm:
                 min=0,
                 is_required=True,
             ),
+            FormField(
+                title="Currency",
+                key="currencyCode",
+                type="autocomplete",
+                options=Options(),
+                is_required=False,
+                placeholder="Leave empty for default currency",
+            ),
         ]
     )
 
@@ -72,23 +90,60 @@ class TransferForm:
         self.isTemplate = isTemplate
         self.defaultDate = defaultDate
         self._populate_form_options()
+        self._populate_currency_options()  # NEW
 
     # region Helpers
     # -------------- Helpers ------------- #
 
     def _populate_form_options(self):
         templates = get_transfer_templates()
+        default_code = CONFIG.defaults.default_currency
         self.FORM.fields[0].options = Options(
             items=[
                 Option(
                     text=template.label,
                     value=template.id,
-                    postfix=Text(f"{template.amount}", style="yellow"),
+                    postfix=Text(
+                        f"{getattr(template, 'currencyCode', None) or default_code} {template.amount}",
+                        style="yellow",
+                    ),
                 )
                 for template in templates
             ]
         )
-        self.FORM.fields[2].default_value = self.defaultDate
+        # date is now index 3
+        self.FORM.fields[3].default_value = self.defaultDate
+
+        
+    def _populate_currency_options(self):
+        currencies_cfg = getattr(CONFIG, "currencies", None)
+        if not currencies_cfg or not getattr(currencies_cfg, "supported", None):
+            return
+
+        def fill_for(form: Form):
+            field = next(
+                (f for f in form.fields if f.key == "currencyCode"),
+                None,
+            )
+            if field is None:
+                return
+
+            items: list[Option] = []
+            for cur in currencies_cfg.supported:
+                label = f"{cur.code} ({cur.symbol})"
+                items.append(Option(text=label, value=cur.code))
+
+            field.options = Options(items=items)
+            default_code = getattr(CONFIG.defaults, "default_currency", None)
+            if default_code:
+                field.default_value = default_code
+                for opt in items:
+                    if opt.value == default_code:
+                        field.default_value_text = opt.text
+                        break
+
+        fill_for(self.FORM)
+        fill_for(self.TEMPLATE_FORM)
 
     # region Builders
     # ------------- Builders ------------- #
@@ -116,6 +171,14 @@ class TransferForm:
                 case "label":
                     field.default_value = str(value) if value is not None else ""
                     field.type = "string"  # disable autocomplete
+                case "currencyCode":
+                    code = value or CONFIG.defaults.default_currency
+                    field.default_value = code
+                    opts = field.options.items if field.options else []
+                    for opt in opts:
+                        if opt.value == code:
+                            field.default_value_text = opt.text
+                            break
                 case _:
                     field.default_value = str(value) if value is not None else ""
 

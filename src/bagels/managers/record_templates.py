@@ -22,9 +22,14 @@ def create_template(data):
 
 
 def create_template_from_record(record):
+    def get_field(src, key):
+        if isinstance(src, dict):
+            return src.get(key)
+        return getattr(src, key, None)
+
     data = {}
-    for x in ["label", "amount", "accountId", "categoryId", "isIncome"]:
-        data[x] = record[x]
+    for x in ["label", "amount", "accountId", "categoryId", "isIncome", "currencyCode"]:
+        data[x] = get_field(record, x)
 
     return create_template(data)
 

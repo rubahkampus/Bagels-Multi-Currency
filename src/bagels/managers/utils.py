@@ -1,3 +1,4 @@
+from collections import defaultdict
 import re
 from datetime import datetime, timedelta
 from functools import lru_cache
@@ -9,6 +10,8 @@ from bagels.config import CONFIG
 from bagels.models.category import Category
 from bagels.models.database.app import db_engine
 from bagels.models.record import Record
+
+from bagels.managers.currency_rates import convert as convert_currency
 
 Session = sessionmaker(bind=db_engine)
 
@@ -140,31 +143,132 @@ def get_period_figures(
         if nature is not None:
             query = query.join(Record.category).filter(Category.nature == nature)
 
-        # Calculate net amount
-        total = 0
+        # Calculate net amount in default currency
+        total = 0.0
+        default_code = CONFIG.defaults.default_currency
         records = query.all()
 
         for record in records:
-            # Skip records that are marked as transfers if filtering by income type
+            # Skip transfers when caller is explicitly asking only for income/expense
             if isIncome is not None and record.isTransfer:
                 continue
 
-            # Skip records that don't match income filter if specified
+            # Skip records that don't match requested income/expense type
             if isIncome is not None and record.isIncome != isIncome:
                 continue
 
-            # Calculate amount after subtracting splits
+            # Amount net of splits, in record's own currency
             split_total = sum(split.amount for split in record.splits)
             record_amount = record.amount - split_total
 
+            # Resolve currency for this record
+            code = getattr(record, "currencyCode", None) or default_code
+
+            # Convert to default currency
+            if code == default_code:
+                amount_default = record_amount
+            else:
+                amount_default = convert_currency(record_amount, code, default_code)
+                if amount_default is None:
+                    # MVP: skip records we can't convert
+                    continue
+
+            # Transfers are ignored here unless you later want a dedicated
+            # "net including transfers" variant
             if not record.isTransfer:
-                # For regular income/expenses
                 if record.isIncome:
-                    total += record_amount
+                    total += amount_default
                 else:
-                    total -= record_amount
+                    total -= amount_default
 
         return abs(round(total, CONFIG.defaults.round_decimals))
+
+    finally:
+        if should_close:
+            session.close()
+            
+            
+def get_period_totals_by_currency(
+    accountId=None,
+    offset_type=None,
+    offset=None,
+    isIncome=None,
+    nature=None,
+    session=None,
+):
+    """
+    Return per-currency income/expense/net totals for a given period.
+
+    No FX conversion is applied; each currency is kept separate.
+
+    Shape:
+        {
+          "USD": {"income": 1000.0, "expense": 200.0, "net": 800.0},
+          "IDR": {"income": 0.0,    "expense": 150000.0, "net": -150000.0},
+        }
+    """
+    if session is None:
+        session = Session()
+        should_close = True
+    else:
+        should_close = False
+
+    try:
+        query = session.query(Record)
+
+        # Filter by account if specified
+        if accountId is not None:
+            query = query.filter(Record.accountId == accountId)
+
+        # Filter by date period if specified
+        if offset_type is not None and offset is not None:
+            start_of_period, end_of_period = get_start_end_of_period(
+                offset, offset_type
+            )
+            query = query.filter(
+                Record.date >= start_of_period, Record.date < end_of_period
+            )
+
+        # Filter by category nature if specified
+        if nature is not None:
+            query = query.join(Record.category).filter(Category.nature == nature)
+
+        default_code = CONFIG.defaults.default_currency
+        totals: dict[str, dict[str, float]] = defaultdict(
+            lambda: {"income": 0.0, "expense": 0.0}
+        )
+
+        for record in query.all():
+            # optional filter: pure income / pure expense
+            if isIncome is not None and record.isIncome != isIncome:
+                continue
+
+            if record.isTransfer:
+                # Transfers don't affect income/expense totals; ignore here
+                continue
+
+            split_total = sum(split.amount for split in record.splits)
+            record_amount = record.amount - split_total
+            code = getattr(record, "currencyCode", None) or default_code
+
+            bucket = totals[code]
+            if record.isIncome:
+                bucket["income"] += record_amount
+            else:
+                bucket["expense"] += record_amount
+
+        # compute net + rounding
+        rounded: dict[str, dict[str, float]] = {}
+        for code, bucket in totals.items():
+            income = round(bucket["income"], CONFIG.defaults.round_decimals)
+            expense = round(bucket["expense"], CONFIG.defaults.round_decimals)
+            net = round(income - expense, CONFIG.defaults.round_decimals)
+            if income == 0 and expense == 0:
+                continue
+            rounded[code] = {"income": income, "expense": expense, "net": net}
+
+        return rounded
+
     finally:
         if should_close:
             session.close()

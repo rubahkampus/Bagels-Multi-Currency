@@ -6,6 +6,8 @@ from bagels.managers.categories import get_all_categories_by_freq
 from bagels.managers.record_templates import get_template_by_id
 from bagels.forms.form import Form, FormField, Option, Options
 
+from bagels.config import CONFIG  # NEW
+
 
 class RecordTemplateForm:
     _instance = None
@@ -42,6 +44,15 @@ class RecordTemplateForm:
                 min=0,
                 is_required=True,
             ),
+            # NEW: template currency (optional)
+            FormField(
+                title="Currency",
+                key="currencyCode",
+                type="autocomplete",
+                options=Options(),
+                is_required=False,
+                placeholder="Leave empty for default currency",
+            ),
             FormField(
                 title="Account",
                 key="accountId",
@@ -64,12 +75,13 @@ class RecordTemplateForm:
 
     def __init__(self):
         self._populate_form_options()
+        self._populate_currency_options()  # NEW
 
     # -------------- Helpers ------------- #
 
     def _populate_form_options(self):
         accounts = get_all_accounts_with_balance()
-        self.FORM.fields[3].options = Options(
+        self.FORM.fields[4].options = Options(
             items=[
                 Option(
                     text=account.name,
@@ -103,6 +115,38 @@ class RecordTemplateForm:
                 for category, _ in categories
             ]
         )
+        
+    def _populate_currency_options(self):
+        currencies_cfg = getattr(CONFIG, "currencies", None)
+        if not currencies_cfg or not getattr(currencies_cfg, "supported", None):
+            return
+
+        currency_field = next(
+            (f for f in self.FORM.fields if f.key == "currencyCode"),
+            None,
+        )
+        if currency_field is None:
+            return
+
+        items: list[Option] = []
+        for cur in currencies_cfg.supported:
+            label = f"{cur.code} ({cur.symbol})"
+            items.append(
+                Option(
+                    text=label,
+                    value=cur.code,
+                )
+            )
+
+        currency_field.options = Options(items=items)
+
+        default_code = getattr(CONFIG.defaults, "default_currency", None)
+        if default_code:
+            currency_field.default_value = default_code
+            for opt in items:
+                if opt.value == default_code:
+                    currency_field.default_value_text = opt.text
+                    break
 
     # ------------- Builders ------------- #
 
@@ -124,6 +168,14 @@ class RecordTemplateForm:
                 case "accountId":
                     field.default_value = template.account.id
                     field.default_value_text = template.account.name
+                case "currencyCode":
+                    code = value or CONFIG.defaults.default_currency
+                    field.default_value = code
+                    opts = field.options.items if field.options else []
+                    for opt in opts:
+                        if opt.value == code:
+                            field.default_value_text = opt.text
+                            break
                 case _:
                     field.default_value = str(value) if value is not None else ""
 

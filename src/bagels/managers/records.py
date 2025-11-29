@@ -11,6 +11,10 @@ from bagels.models.database.app import db_engine
 from bagels.models.record import Record
 from bagels.models.split import Split
 
+from bagels.config import CONFIG
+from bagels.managers.currency_rates import convert as convert_currency
+
+
 Session = sessionmaker(bind=db_engine)
 
 
@@ -134,13 +138,25 @@ def _get_spending_records(session, start_date, end_date):
 
 
 def _calculate_daily_spending(records, start_date, end_date, cumulative=False):
-    """Calculate daily spending with optional cumulative sum"""
-    daily_spending = {}
+    """Calculate daily spending with optional cumulative sum (in default currency)"""
+    daily_spending: dict = {}
+    default_code = CONFIG.defaults.default_currency
+
     for record in records:
         date_key = record.date.date()
         splits_sum = sum(split.amount for split in record.splits)
-        actual_spend = record.amount - splits_sum
-        daily_spending[date_key] = daily_spending.get(date_key, 0) + actual_spend
+        record_amount = record.amount - splits_sum  # in record's currency
+
+        code = getattr(record, "currencyCode", None) or default_code
+        if code == default_code:
+            amount_default = record_amount
+        else:
+            amount_default = convert_currency(record_amount, code, default_code)
+            if amount_default is None:
+                # MVP: skip if we don't have a rate
+                continue
+
+        daily_spending[date_key] = daily_spending.get(date_key, 0.0) + amount_default
 
     current_date = start_date.date()
     end_date_normalized = end_date.date()
@@ -222,16 +238,33 @@ def get_daily_balance(start_date, end_date) -> list[float]:
             .all()
         )
 
+        default_code = CONFIG.defaults.default_currency
+
         def adjust_balance(r):
+            # Base effect in the record's own currency
             if r.isTransfer:
                 if r.transferToAccount and r.transferToAccount.name == "Outside source":
-                    return -r.amount
-                if r.account and r.account.name == "Outside source":
-                    return r.amount
+                    base_effect = -r.amount
+                elif r.account and r.account.name == "Outside source":
+                    base_effect = r.amount
+                else:
+                    base_effect = 0
+            elif r.isIncome:
+                base_effect = r.amount - sum(s.amount for s in r.splits)
+            else:
+                base_effect = -r.amount + sum(s.amount for s in r.splits)
+
+            code = getattr(r, "currencyCode", None) or default_code
+
+            if code == default_code:
+                return base_effect
+
+            converted = convert_currency(base_effect, code, default_code)
+            if converted is None:
+                # MVP: ignore records we can't convert
                 return 0
-            if r.isIncome:
-                return r.amount - sum(s.amount for s in r.splits)
-            return -r.amount + sum(s.amount for s in r.splits)
+            return converted
+
 
         for rec in old_records:
             total_balance += adjust_balance(rec)

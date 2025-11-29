@@ -10,6 +10,10 @@ from bagels.models.person import Person
 from bagels.models.record import Record
 from bagels.models.split import Split
 
+from bagels.config import CONFIG
+from bagels.managers.currency_rates import convert as convert_currency
+
+
 Session = sessionmaker(bind=db_engine)
 
 
@@ -114,51 +118,62 @@ class PersonWithDue:
 
 
 def get_persons_with_net_due() -> list[Person]:
-    """Retrieve all persons with their net due amount."""
+    """Retrieve all persons with their net due amount, in default currency."""
     session = Session()
     try:
+        default_code = CONFIG.defaults.default_currency
+
+        # Load all unpaid splits with their persons and records
         stmt = (
-            select(
-                Person,
-                (
-                    func.coalesce(
-                        select(func.sum(Split.amount))
-                        .select_from(Split)
-                        .join(Record)
-                        .where(
-                            Split.personId == Person.id,
-                            Record.isIncome == False,  # noqa: E712
-                            Split.isPaid == False,  # noqa: E712
-                        )
-                        .correlate(Person)
-                        .scalar_subquery(),
-                        0,
-                    )
-                    - func.coalesce(
-                        select(func.sum(Split.amount))
-                        .select_from(Split)
-                        .join(Record)
-                        .where(
-                            Split.personId == Person.id,
-                            Record.isIncome == True,  # noqa: E712
-                            Split.isPaid == False,  # noqa: E712
-                        )
-                        .correlate(Person)
-                        .scalar_subquery(),
-                        0,
-                    )
-                ).label("due"),
+            select(Person, Split, Record)
+            .join(Split, Split.personId == Person.id)
+            .join(Record, Split.recordId == Record.id)
+            .where(
+                Person.deletedAt.is_(None),
+                Split.isPaid == False,  # noqa: E712
             )
-            .select_from(Person)
-            .where(Person.deletedAt.is_(None))
-            .order_by(desc(func.abs(column("due"))), Person.name)
         )
 
-        result = session.execute(stmt).all()
-        persons_with_due = []
-        for person, due in result:
-            person.due = due
+        rows = session.execute(stmt).all()
+        dues: dict[int, float] = {}
+        persons_map: dict[int, Person] = {}
+
+        for person, split, record in rows:
+            persons_map[person.id] = person
+
+            # Base effect in the split's own sign:
+            # - expense split: they owe us  +amount
+            # - income split: we owe them   -amount
+            if record.isIncome:
+                base_effect = -split.amount
+            else:
+                base_effect = split.amount
+
+            code = (
+                getattr(split, "currencyCode", None)
+                or getattr(record, "currencyCode", None)
+                or default_code
+            )
+
+            if code == default_code:
+                amount_default = base_effect
+            else:
+                amount_default = convert_currency(base_effect, code, default_code)
+                if amount_default is None:
+                    # skip this split if we can't convert
+                    continue
+
+            dues[person.id] = dues.get(person.id, 0.0) + amount_default
+
+        persons_with_due: list[Person] = []
+        for pid, person in persons_map.items():
+            person.due = dues.get(pid, 0.0)
             persons_with_due.append(person)
+
+        # Sort by absolute due descending, then by name
+        persons_with_due.sort(
+            key=lambda p: (-abs(getattr(p, "due", 0.0)), p.name or "")
+        )
         return persons_with_due
     finally:
         session.close()

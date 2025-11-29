@@ -31,6 +31,10 @@ class RecordTemplate(Base):
     id = Column(Integer, primary_key=True, index=True)
     label = Column(String, nullable=False)
     amount = Column(Float, CheckConstraint("amount > 0"), nullable=False)
+    
+    # NEW: ISO-like currency code for this template, e.g. "USD", "EUR", "IDR"
+    currencyCode = Column(String(3), nullable=True)
+    
     accountId = Column(Integer, ForeignKey("account.id"), nullable=False)
     categoryId = Column(Integer, ForeignKey("category.id"), nullable=True)
 
@@ -59,6 +63,8 @@ class RecordTemplate(Base):
             "isIncome": self.isIncome,
             "isTransfer": self.isTransfer,
             "transferToAccountId": self.transferToAccountId,
+            # NEW:
+            "currencyCode": self.currencyCode,
         }
 
     @validates("order")
@@ -71,6 +77,20 @@ class RecordTemplate(Base):
     def validate_amount(self, key, value):
         if value is not None:
             return round(value, CONFIG.defaults.round_decimals)
+        return value
+    
+    @validates("currencyCode")
+    def validate_currency_code(self, key, value):
+        """
+        Normalise per-split currency codes:
+        - None / empty -> None
+        - strip + uppercase 3-letter code
+        """
+        if not value:
+            return None
+        value = value.strip().upper()
+        if len(value) != 3:
+            raise ValueError(f"Invalid currency code: {value!r}")
         return value
 
 

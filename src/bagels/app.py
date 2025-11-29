@@ -15,7 +15,7 @@ from textual.widgets import Footer, Label, Tab, Tabs
 
 from bagels.components.jump_overlay import JumpOverlay
 from bagels.components.jumper import Jumper
-from bagels.config import CONFIG, write_state
+from bagels.config import CONFIG, write_state, set_default_currency
 from bagels.home import Home
 from bagels.locations import data_directory
 from bagels.manager import Manager
@@ -103,6 +103,46 @@ class App(TextualApp):
             f"Theme is now [b]{theme!r}[/].", title="Theme updated", timeout=2.5
         )
         write_state("theme", theme)
+        
+    def command_default_currency(self, code: str) -> None:
+        """Set the default currency, e.g. 'USD', 'EUR', 'IDR'."""
+        normalized = (code or "").strip().upper()
+        supported = [c.code for c in CONFIG.currencies.supported]
+
+        if normalized not in supported:
+            self.notify(
+                f"Unsupported currency code {normalized!r}. Supported: {', '.join(supported)}",
+                title="Invalid currency",
+                severity="error",
+            )
+            return
+
+        if CONFIG.defaults.default_currency == normalized:
+            self.notify(
+                f"Default currency is already {normalized}.",
+                title="No change",
+                timeout=2.0,
+            )
+            return
+
+        try:
+            set_default_currency(normalized)
+        except Exception as e:
+            self.notify(
+                f"Failed to set default currency: {e}",
+                title="Error",
+                severity="error",
+            )
+            return
+
+        self.notify(
+            f"Default currency set to [b]{normalized}[/].",
+            title="Default currency updated",
+            timeout=2.5,
+        )
+        # Force UI to recompute summaries / labels with the new default
+        self.refresh(layout=True, recompose=True)
+
 
     # region theme
     # --------------- theme -------------- #

@@ -14,6 +14,8 @@ from bagels.managers.records import (
 )
 from bagels.utils.format import format_date_to_readable
 
+from bagels.utils.currency import format_record_amount, format_amount  # NEW
+
 
 class DisplayMode:
     DATE = "d"
@@ -161,7 +163,7 @@ class RecordTableBuilder:
             flow_icon_negative = f"[red]{CONFIG.symbols.amount_negative}[/red]"
         return flow_icon_positive if is_income else flow_icon_negative
 
-    def _format_record_fields(self, record, flow_icon: str) -> tuple[str, str]:
+    def _format_record_fields(self, record, flow_icon: str) -> tuple[str, str, str]:
         if record.isTransfer:
             from_account = (
                 "[italic]" + record.account.name + "[/italic]"
@@ -174,23 +176,35 @@ class RecordTableBuilder:
                 else record.transferToAccount.name
             )
             category_string = f"{from_account} → {to_account}"
-            amount_string = record.amount
+
+            amount_fmt = format_record_amount(record)
+            
+            amount_string = amount_fmt  # no flow icon for transfers
             account_string = "-"
         else:
             color_tag = record.category.color.lower()
-            category_string = f"[{color_tag}]{CONFIG.symbols.category_color}[/{color_tag}] {record.category.name}"
+            category_string = (
+                f"[{color_tag}]{CONFIG.symbols.category_color}[/{color_tag}] "
+                f"{record.category.name}"
+            )
 
             if record.splits and not self.show_splits:
-                amount_self = round(
-                    record.amount - get_record_total_split_amount(record.id), 2
+                # Self amount = record total - total splits
+                amount_self = record.amount - get_record_total_split_amount(record.id)
+                # For self-total we keep only base currency (no default equiv in MVP)
+                amount_fmt = format_amount(
+                    amount_self,
+                    getattr(record, "currencyCode", None),
                 )
-                amount_string = f"{flow_icon} {amount_self}"
             else:
-                amount_string = f"{flow_icon} {record.amount}"
+                # Normal record amount: symbol + default-currency equivalent
+                amount_fmt = format_record_amount(record)
 
+            amount_string = f"{flow_icon} {amount_fmt}"
             account_string = record.account.name
 
         return category_string, amount_string, account_string
+
 
     def _add_group_header_row(
         self, table: DataTable, string: str, key: str = None
@@ -203,6 +217,13 @@ class RecordTableBuilder:
             record.amount - get_record_total_split_amount(record.id),
             CONFIG.defaults.round_decimals,
         )
+        
+        # New
+        amount_self_fmt = format_amount(
+            amount_self,
+            getattr(record, "currencyCode", None),
+        )
+        
         split_flow_icon = (
             f"[red]{CONFIG.symbols.amount_negative}[/red]"
             if record.isIncome
@@ -218,11 +239,17 @@ class RecordTableBuilder:
                 if split.paidDate
                 else Text("-")
             )
+            
+            # New
+            split_amount_fmt = format_amount(
+                split.amount,
+                getattr(record, "currencyCode", None),
+            )
 
             table.add_row(
                 " ",
                 f"{line_char} {paid_status_icon} {split.person.name}",
-                f"{split_flow_icon} {split.amount}",
+                f"{split_flow_icon} {split_amount_fmt}",
                 date_string,
                 split.account.name if split.account else "-",
                 key=f"s-{str(split.id)}",
@@ -232,7 +259,7 @@ class RecordTableBuilder:
         table.add_row(
             "",
             f"{finish_line_char} Self total",
-            f"= {amount_self}",
+            f"= {amount_self_fmt}",
             "",
             "",
             style_name="net",
@@ -262,69 +289,85 @@ class RecordTableBuilder:
 
         # Display each person and their splits
         for person in persons:
-            if person.splits:  # Person has splits for this month
-                # Add person header
-                self._add_group_header_row(
-                    table, person.name, key=f"p-{str(person.id)}"
+            if not person.splits:  # Person has no splits for this period
+                continue
+
+            # Person header row
+            self._add_group_header_row(
+                table, person.name, key=f"p-{str(person.id)}"
+            )
+
+            total_unpaid = 0  # aggregated in the same way as before
+
+            for split in person.splits:
+                record = split.record
+
+                paid_icon = (
+                    f"[green]{CONFIG.symbols.split_paid}[/green]"
+                    if split.isPaid
+                    else f"[red]{CONFIG.symbols.split_unpaid}[/red]"
                 )
 
-                # Add splits for this person
-                total_unpaid = 0  # Initialize total unpaid amount for this person
-                for split in person.splits:
-                    record = split.record
-                    paid_icon = (
-                        f"[green]{CONFIG.symbols.split_paid}[/green]"
-                        if split.isPaid
-                        else f"[red]{CONFIG.symbols.split_unpaid}[/red]"
-                    )
-                    date = (
-                        format_date_to_readable(split.paidDate)
-                        if split.paidDate
-                        else "Not paid"
-                    )
-                    record_date = format_date_to_readable(record.date)
-                    category = f"[{record.category.color.lower()}]{CONFIG.symbols.category_color}[/{record.category.color.lower()}] {record.category.name}"
+                date = (
+                    format_date_to_readable(split.paidDate)
+                    if split.paidDate
+                    else "Not paid"
+                )
+                record_date = format_date_to_readable(record.date)
 
-                    # Calculate amount and update total of unpaid amounts
-                    if not split.isPaid:
-                        split_amount = split.amount
-                        if record.isIncome:
-                            split_amount = -split_amount  # Negate income amounts
-                        total_unpaid += split_amount
+                category = (
+                    f"[{record.category.color.lower()}]{CONFIG.symbols.category_color}"
+                    f"[/{record.category.color.lower()}] {record.category.name}"
+                )
 
-                    amount = (
-                        f"[red]{CONFIG.symbols.amount_negative}[/red] {split.amount}"
-                        if record.isIncome
-                        else f"[green]{CONFIG.symbols.amount_positive}[/green] {split.amount}"
-                    )
-                    account = f"→ {split.account.name}" if split.account else "-"
+                # Unpaid total logic (unchanged semantics)
+                if not split.isPaid:
+                    signed_amount = split.amount
+                    if record.isIncome:
+                        signed_amount = -signed_amount  # income flips sign
+                    total_unpaid += signed_amount
 
-                    label_string = self._get_label_string(record.label)
+                # NEW: format split amount with the record currency
+                split_amount_fmt = format_amount(
+                    split.amount,
+                    getattr(record, "currencyCode", None),
+                )
 
-                    table.add_row(
-                        " ",
-                        f"{paid_icon} {date}",
-                        record_date,
-                        category,
-                        amount,
-                        account,
-                        label_string,
-                        key=f"s-{split.id}",
-                    )
+                amount = (
+                    f"[red]{CONFIG.symbols.amount_negative}[/red] {split_amount_fmt}"
+                    if record.isIncome
+                    else f"[green]{CONFIG.symbols.amount_positive}[/green] {split_amount_fmt}"
+                )
 
-                # Add total row for this person showing unpaid amount. We reverse the color indicator.
-                if total_unpaid == 0:
-                    total_display = "0.0"
-                elif total_unpaid < 0:
-                    total_display = f"[green]{abs(total_unpaid)}[/green]"
-                else:
-                    total_display = f"[red]{abs(total_unpaid)}[/red]"
+                account = f"→ {split.account.name}" if split.account else "-"
+
+                label_string = self._get_label_string(record.label)
+
                 table.add_row(
                     " ",
-                    "[bold]Total Unpaid[/bold]",
-                    "",
-                    "",
-                    f"[bold]{total_display}[/bold]",
-                    "",
-                    key=f"t-{str(person.id)}",
+                    f"{paid_icon} {date}",
+                    record_date,
+                    category,
+                    amount,
+                    account,
+                    label_string,
+                    key=f"s-{split.id}",
                 )
+
+            # Total row per person (keeps old behaviour, just colored number)
+            if total_unpaid == 0:
+                total_display = "0.0"
+            elif total_unpaid < 0:
+                total_display = f"[green]{abs(total_unpaid)}[/green]"
+            else:
+                total_display = f"[red]{abs(total_unpaid)}[/red]"
+
+            table.add_row(
+                " ",
+                "[bold]Total Unpaid[/bold]",
+                "",
+                "",
+                f"[bold]{total_display}[/bold]",
+                "",
+                key=f"t-{str(person.id)}",
+            )

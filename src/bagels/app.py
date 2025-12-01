@@ -66,6 +66,8 @@ class App(TextualApp):
         # Get package metadata directly
         meta = metadata("bagels")
         self.project_info = {"name": meta["Name"], "version": meta["Version"]}
+        
+        self.sub_title = f"Default currency: {CONFIG.defaults.default_currency}"
 
     def on_mount(self) -> None:
         # --------------- theme -------------- #

@@ -57,6 +57,16 @@ Records .label-highlight-match {
             "Display by Date",
             show=False,
         ),
+        Binding(
+            CONFIG.hotkeys.home.add_currency,  # you can later promote this to CONFIG.hotkeys.home.add_currency
+            "add_currency",
+            "Add currency",
+        ),
+        Binding(
+            CONFIG.hotkeys.home.set_default_currency,  # or CONFIG.hotkeys.home.set_default_currency if you prefer
+            "set_default_currency",
+            "Default currency",
+        ),
     ]
 
     can_focus = True

@@ -1,0 +1,158 @@
+currencies:
+  supported:
+  - code: USD
+    decimals: 2
+    symbol: $
+  - code: EUR
+    decimals: 2
+    symbol: "\u20AC"
+  - code: GBP
+    decimals: 2
+    symbol: "\xA3"
+  - code: JPY
+    decimals: 0
+    symbol: "\xA5"
+  - code: CHF
+    decimals: 2
+    symbol: CHF
+  - code: CAD
+    decimals: 2
+    symbol: $
+  - code: AUD
+    decimals: 2
+    symbol: $
+  - code: NZD
+    decimals: 2
+    symbol: $
+  - code: CNY
+    decimals: 2
+    symbol: "\xA5"
+  - code: HKD
+    decimals: 2
+    symbol: $
+  - code: SGD
+    decimals: 2
+    symbol: $
+  - code: IDR
+    decimals: 0
+    symbol: Rp
+  - code: MYR
+    decimals: 2
+    symbol: RM
+  - code: THB
+    decimals: 2
+    symbol: "\u0E3F"
+  - code: PHP
+    decimals: 2
+    symbol: "\u20B1"
+  - code: VND
+    decimals: 0
+    symbol: "\u20AB"
+  - code: INR
+    decimals: 2
+    symbol: "\u20B9"
+  - code: KRW
+    decimals: 0
+    symbol: "\u20A9"
+  - code: BRL
+    decimals: 2
+    symbol: R$
+  - code: RUB
+    decimals: 2
+    symbol: "\u20BD"
+  - code: MXN
+    decimals: 2
+    symbol: $
+  - code: ZAR
+    decimals: 2
+    symbol: R
+  - code: TRY
+    decimals: 2
+    symbol: "\u20BA"
+  - code: PLN
+    decimals: 2
+    symbol: "z\u0142"
+  - code: SEK
+    decimals: 2
+    symbol: kr
+  - code: NOK
+    decimals: 2
+    symbol: kr
+  - code: DKK
+    decimals: 2
+    symbol: kr
+  - code: JOD
+    decimals: 3
+    symbol: JD
+  - code: KWD
+    decimals: 3
+    symbol: KD
+  - code: BHD
+    decimals: 3
+    symbol: BD
+  - code: TND
+    decimals: 3
+    symbol: DT
+  - code: SDD
+    decimals: 2
+    symbol: SD
+defaults:
+  date_format: '%d/%m'
+  default_currency: USD
+  first_day_of_week: 6
+  period: week
+  plot_marker: braille
+  round_decimals: 2
+hotkeys:
+  categories:
+    browse_defaults: b
+    new_subcategory: s
+  delete: d
+  edit: e
+  home:
+    add_currency: ctrl+t
+    advance_filter: f
+    budgets: b
+    cycle_offset_type: .
+    cycle_tabs: c
+    datemode:
+      go_to_day: g
+    display_by_date: q
+    display_by_person: w
+    new_transfer: t
+    select_next_account: ']'
+    select_prev_account: '['
+    set_default_currency: ctrl+y
+    set_manual_rate: ctrl+r
+    toggle_income_mode: /
+    toggle_splits: s
+    toggle_use_account: \
+  new: a
+  record_modal:
+    delete_last_split: ctrl+d
+    new_paid_split: ctrl+shift+a
+    new_split: ctrl+a
+    submit_and_template: ctrl+t
+  toggle_jump_mode: v
+state:
+  budgeting:
+    income_assess_fallback: 3500
+    income_assess_metric: periodIncome
+    income_assess_threshold: 100
+    savings_amount: 0
+    savings_assess_metric: percentagePeriodIncome
+    savings_percentage: 0.2
+    wants_spending_amount: 0
+    wants_spending_assess_metric: percentageQuota
+    wants_spending_percentage: 0.2
+  check_for_updates: true
+  footer_visibility: true
+  theme: tokyo-night
+symbols:
+  amount_negative: '-'
+  amount_positive: +
+  category_color: "\u25CF"
+  finish_line_char: "\u2570"
+  line_char: "\u2502"
+  split_paid: "\u2713"
+  split_unpaid: "\u2A2F"

@@ -10,6 +10,8 @@ from bagels.managers.utils import (
     get_period_figures,
 )
 
+from bagels.utils.currency import format_amount_default
+
 
 class Insights(Static):
     can_focus = True
@@ -76,8 +78,8 @@ class Insights(Static):
             offset=self.page_parent.filter["offset"],
             offset_type=self.page_parent.filter["offset_type"],
         )
-        period_net_label.update(str(period_net))
-        period_average_label.update(str(period_average))
+        period_net_label.update(str(format_amount_default(period_net)))
+        period_average_label.update(str(format_amount_default(period_average)))
 
         return period_net
 

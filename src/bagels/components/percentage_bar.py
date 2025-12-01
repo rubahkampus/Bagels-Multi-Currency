@@ -5,6 +5,8 @@ from textual.color import Color
 from textual.containers import Container
 from textual.widgets import Label, Static
 
+from bagels.utils.currency import format_amount_default
+
 
 class PercentageBarItem(BaseModel):
     name: str
@@ -126,7 +128,7 @@ class PercentageBar(Static):
             ):  # if we have more items than labels, we create a new label
                 label_widget = Container(
                     Label(f"[{color}]●[/{color}] {item.name}", classes="name"),
-                    Label(f"{percentage}% ({item.count})", classes="percentage"),
+                    Label(f"{percentage}% ({format_amount_default(item.count)})", classes="percentage"),
                     classes="bar-label",
                 )
                 self.labels_container.mount(label_widget)

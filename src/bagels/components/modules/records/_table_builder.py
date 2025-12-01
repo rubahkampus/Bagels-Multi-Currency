@@ -353,14 +353,24 @@ class RecordTableBuilder:
                     label_string,
                     key=f"s-{split.id}",
                 )
+                
+            total_unpaid_fmt = format_amount(
+                    abs(total_unpaid),
+                    getattr(record, "currencyCode", None),
+                )
+                
+            total_unpaid_abs_fmt = format_amount(
+                    abs(total_unpaid),
+                    getattr(record, "currencyCode", None),
+                )
 
             # Total row per person (keeps old behaviour, just colored number)
             if total_unpaid == 0:
                 total_display = "0.0"
             elif total_unpaid < 0:
-                total_display = f"[green]{abs(total_unpaid)}[/green]"
+                total_display = f"[green]{total_unpaid_abs_fmt}[/green]"
             else:
-                total_display = f"[red]{abs(total_unpaid)}[/red]"
+                total_display = f"[red]{total_unpaid_abs_fmt}[/red]"
 
             table.add_row(
                 " ",

@@ -21,9 +21,10 @@ from bagels.modals.input import InputModal
 from bagels.modals.record import RecordModal
 from bagels.modals.transfer import TransferModal
 
-from bagels.config import CONFIG
+from bagels.config import CONFIG, set_default_currency, add_currency
 from bagels.managers.currency_rates import get_rate, set_rate
 from bagels.modals.currency_rate import CurrencyRateModal
+from bagels.modals.currency_config import AddCurrencyModal, DefaultCurrencyModal
 
 
 class RecordCUD:
@@ -355,3 +356,112 @@ class RecordCUD:
             ),
             callback=check_result,
         )
+    
+    
+    # ----------------- Currency config helpers ----------------- #
+
+    def _handle_add_currency_result(self, result: dict | None) -> None:
+        """Apply AddCurrencyModal result -> add/update CONFIG.currencies."""
+        if not result:
+            return
+
+        code_raw = result.get("code", "")
+        symbol_raw = result.get("symbol", "")
+        decimals_raw = result.get("decimals", 2)
+
+        try:
+            code = str(code_raw).strip().upper()
+            symbol = str(symbol_raw).strip()
+            # validateForm with type="number" returns float; coerce to int
+            decimals = int(decimals_raw)
+        except Exception as e:
+            self.app.notify(
+                title="Error",
+                message=f"Invalid currency data: {e}",
+                severity="error",
+                timeout=8,
+            )
+            return
+
+        try:
+            add_currency(code=code, symbol=symbol, decimals=decimals)
+        except Exception as e:
+            self.app.notify(
+                title="Error",
+                message=f"Failed to save currency: {e}",
+                severity="error",
+                timeout=8,
+            )
+            return
+
+        self.app.notify(
+            title="Currency saved",
+            message=f"{code} ({symbol or code}, {decimals} decimals)",
+            severity="information",
+            timeout=3,
+        )
+        # Rebuild UI so new currency appears in dropdowns / defaults
+        self.app.refresh(layout=True, recompose=True)
+
+    def _handle_default_currency_result(self, result: dict | None) -> None:
+        """Apply DefaultCurrencyModal result -> set_default_currency()."""
+        if not result:
+            return
+
+        code_raw = result.get("code", "")
+        code = str(code_raw).strip().upper()
+        if not code:
+            self.app.notify(
+                title="Error",
+                message="No currency selected",
+                severity="error",
+                timeout=5,
+            )
+            return
+
+        try:
+            set_default_currency(code)
+        except Exception as e:
+            self.app.notify(
+                title="Error",
+                message=f"Failed to set default currency: {e}",
+                severity="error",
+                timeout=8,
+            )
+            return
+
+        self.app.notify(
+            title="Default currency updated",
+            message=f"Default currency set to {code}",
+            severity="information",
+            timeout=3,
+        )
+        # Make sure all modules pick up the new default
+        self.app.refresh(layout=True, recompose=True)
+        
+        
+    # ----------------- Actions: open modals ----------------- #
+
+    def action_add_currency(self) -> None:
+        """
+        Open a modal to add / update a currency in CONFIG.currencies.supported.
+
+        Bound to ctrl+shift+c in BINDINGS.
+        """
+        self.app.push_screen(
+            AddCurrencyModal(),
+            callback=self._handle_add_currency_result,
+        )
+
+    def action_set_default_currency(self) -> None:
+        """
+        Open a modal that lets the user change CONFIG.defaults.default_currency.
+
+        Bound to ctrl+shift+d in BINDINGS.
+        """
+        self.app.push_screen(
+            DefaultCurrencyModal(),
+            callback=self._handle_default_currency_result,
+        )
+
+

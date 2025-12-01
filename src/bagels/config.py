@@ -2,7 +2,7 @@ import os
 import platform
 import subprocess
 import warnings
-from typing import Any, Literal
+from typing import Any, Literal, List, Dict, Optional
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -20,11 +20,16 @@ class Defaults(BaseModel):
     # NEW:
     default_currency: str = "USD"  # or "IDR" if you want that as repo default
     
+    @field_validator("default_currency")
+    @classmethod
+    def normalize_default_currency(cls, v: str) -> str:
+        return (v or "").strip().upper()
+    
     
 class CurrencyConfig(BaseModel):
-    code: str      # ISO-like, e.g. "USD"
-    symbol: str    # e.g. "$"
-    decimals: int  # e.g. 2 for USD, 0 for IDR
+    code: str = Field(..., description="ISO-4217 currency code, e.g. 'USD'")
+    symbol: str = Field(..., description="Display symbol, e.g. '$', 'Rp'")
+    decimals: int = Field(..., ge=0, le=4, description="Decimal places used")
 
     @field_validator("code")
     @classmethod
@@ -34,13 +39,28 @@ class CurrencyConfig(BaseModel):
             raise ValueError(f"currency code must be 3 letters, got {v!r}")
         return v
 
+    @field_validator("code")
+    @classmethod
+    def normalize_code(cls, v: str) -> str:
+        v = v.strip().upper()
+        if len(v) != 3:
+            raise ValueError(...)
+        return v
+
 
 class Currencies(BaseModel):
-    supported: list[CurrencyConfig] = [
-        CurrencyConfig(code="USD", symbol="$",  decimals=2),
-        CurrencyConfig(code="EUR", symbol="€",  decimals=2),
-        CurrencyConfig(code="IDR", symbol="Rp", decimals=0),
-    ]
+    supported: List[CurrencyConfig]
+
+    def get_by_code(self, code: str) -> Optional[CurrencyConfig]:
+        code = code.upper()
+        for c in self.supported:
+            if c.code == code:
+                return c
+        return None
+    
+    
+def _default_currencies() -> Currencies:
+    return Currencies(supported=list(CURRENCY_TABLE.values()))
 
 
 class DatemodeHotkeys(BaseModel):
@@ -61,6 +81,8 @@ class HomeHotkeys(BaseModel):
     select_next_account: str = "]"
     toggle_use_account: str = "\\"
     set_manual_rate: str = "ctrl+r"
+    add_currency: str = "ctrl+y"
+    set_default_currency: str = "ctrl+t"
     datemode: DatemodeHotkeys = DatemodeHotkeys()
 
 
@@ -136,7 +158,7 @@ class Config(BaseModel):
     defaults: Defaults = Defaults()
     state: State = State()
     
-    currencies: Currencies = Currencies()  # NEW
+    currencies: Currencies = Field(default_factory=_default_currencies) # NEW
 
     def __init__(self, **data):
         try:
@@ -223,7 +245,7 @@ class Config(BaseModel):
             symbols=Symbols(),
             defaults=Defaults(),
             state=State(),
-            currencies=Currencies(),
+            currencies=_default_currencies()
         )
 
 
@@ -344,3 +366,119 @@ def set_default_currency(code: str) -> None:
 
     # Update in-memory CONFIG
     CONFIG.defaults.default_currency = code
+    
+    
+def add_currency(code: str, symbol: str | None = None, decimals: int = 2) -> None:
+    """
+    Add or update a currency in CONFIG.currencies.supported and persist to config.yaml.
+
+    - code: 3-letter code, case-insensitive (e.g. "usd", "USD").
+    - symbol: printable symbol (e.g. "$"); if empty, falls back to code.
+    - decimals: number of fraction digits (e.g. 2 for USD, 0 for IDR).
+    """
+    global CONFIG
+
+    if CONFIG is None:
+        # Ensure global CONFIG is initialized
+        load_config()
+
+    code = (code or "").strip().upper()
+    if not code:
+        raise ValueError("Currency code cannot be empty")
+    if len(code) != 3:
+        raise ValueError("Currency code must be 3 letters (e.g. USD, IDR)")
+
+    if decimals < 0:
+        raise ValueError("decimals must be >= 0")
+
+    symbol = (symbol or "").strip() or code
+
+    # --- Update YAML on disk ---------------------------------
+    try:
+        with open(config_file(), "r") as f:
+            raw = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        raw = {}
+
+    currencies_cfg = raw.setdefault("currencies", {})
+    supported_list = currencies_cfg.setdefault("supported", [])
+
+    found = False
+    for item in supported_list:
+        if str(item.get("code", "")).strip().upper() == code:
+            item["symbol"] = symbol
+            item["decimals"] = int(decimals)
+            found = True
+            break
+
+    if not found:
+        supported_list.append(
+            {
+                "code": code,
+                "symbol": symbol,
+                "decimals": int(decimals),
+            }
+        )
+
+    with open(config_file(), "w") as f:
+        yaml.safe_dump(raw, f, default_flow_style=False)
+
+    # --- Update in-memory CONFIG -----------------------------
+    existing = None
+    for c in CONFIG.currencies.supported:
+        if c.code.upper() == code:
+            existing = c
+            break
+
+    if existing is not None:
+        existing.symbol = symbol
+        existing.decimals = int(decimals)
+    else:
+        # CurrencyConfig is defined earlier in this module
+        CONFIG.currencies.supported.append(
+            CurrencyConfig(code=code, symbol=symbol, decimals=int(decimals))
+        )
+
+
+CURRENCY_TABLE: Dict[str, CurrencyConfig] = {
+    # Major
+    "USD": CurrencyConfig(code="USD", symbol="$", decimals=2),
+    "EUR": CurrencyConfig(code="EUR", symbol="€", decimals=2),
+    "GBP": CurrencyConfig(code="GBP", symbol="£", decimals=2),
+    "JPY": CurrencyConfig(code="JPY", symbol="¥", decimals=0),
+    "CHF": CurrencyConfig(code="CHF", symbol="CHF", decimals=2),
+    "CAD": CurrencyConfig(code="CAD", symbol="$", decimals=2),
+    "AUD": CurrencyConfig(code="AUD", symbol="$", decimals=2),
+    "NZD": CurrencyConfig(code="NZD", symbol="$", decimals=2),
+    "CNY": CurrencyConfig(code="CNY", symbol="¥", decimals=2),
+    "HKD": CurrencyConfig(code="HKD", symbol="$", decimals=2),
+    "SGD": CurrencyConfig(code="SGD", symbol="$", decimals=2),
+
+    # Indonesia etc.
+    "IDR": CurrencyConfig(code="IDR", symbol="Rp", decimals=0),
+    "MYR": CurrencyConfig(code="MYR", symbol="RM", decimals=2),
+    "THB": CurrencyConfig(code="THB", symbol="฿", decimals=2),
+    "PHP": CurrencyConfig(code="PHP", symbol="₱", decimals=2),
+    "VND": CurrencyConfig(code="VND", symbol="₫", decimals=0),
+
+    # Some others as examples
+    "INR": CurrencyConfig(code="INR", symbol="₹", decimals=2),
+    "KRW": CurrencyConfig(code="KRW", symbol="₩", decimals=0),
+    "BRL": CurrencyConfig(code="BRL", symbol="R$", decimals=2),
+    "RUB": CurrencyConfig(code="RUB", symbol="₽", decimals=2),
+    "MXN": CurrencyConfig(code="MXN", symbol="$", decimals=2),
+    "ZAR": CurrencyConfig(code="ZAR", symbol="R", decimals=2),
+    "TRY": CurrencyConfig(code="TRY", symbol="₺", decimals=2),
+    "PLN": CurrencyConfig(code="PLN", symbol="zł", decimals=2),
+    "SEK": CurrencyConfig(code="SEK", symbol="kr", decimals=2),
+    "NOK": CurrencyConfig(code="NOK", symbol="kr", decimals=2),
+    "DKK": CurrencyConfig(code="DKK", symbol="kr", decimals=2),
+
+    # Currencies with 3 decimals
+    "JOD": CurrencyConfig(code="JOD", symbol="JD", decimals=3),
+    "KWD": CurrencyConfig(code="KWD", symbol="KD", decimals=3),
+    "BHD": CurrencyConfig(code="BHD", symbol="BD", decimals=3),
+    "TND": CurrencyConfig(code="TND", symbol="DT", decimals=3),
+
+    # …extend this dict to as many ISO-4217 entries as you like…
+}

@@ -123,7 +123,17 @@ def format_record_amount(record, show_default_equiv: bool = True) -> str:
     equiv = convert(record.amount, code, default_code)
     if equiv is None:
         # No rate available → still show base, mark as such
-        return f"{base_str} (no rate)"
+        return f"{base_str} (no rate for {default_code} ↔ {code})"
 
     equiv_str = format_amount(equiv, default_code)
     return f"{base_str} (≈ {equiv_str})"
+
+def format_amount_default(amount) -> str:
+    """
+    Format an amount in the default currency.
+    """
+    
+    code = CONFIG.defaults.default_currency
+    base_str = format_amount(amount, code)
+    
+    return f"{base_str}"
